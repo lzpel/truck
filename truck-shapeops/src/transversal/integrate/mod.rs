@@ -98,7 +98,12 @@ fn process_one_pair_of_shells<C: ShapeOpsCurve<S>, S: ShapeOpsSurface>(
     let mut cls1 = divide_face::divide_faces(&altshell1, &loops_store1, tol)?;
     cls1.integrate_by_component();
     let [mut and0, mut or0, unknown0] = cls0.and_or_unknown();
-	println!("未知の面を分類しています...");
+	for i in [(&and0, "and"), (&or0, "or"), (&unknown0, "unknown")] {
+		std::fs::create_dir_all("out").unwrap();
+		let mut obj = std::fs::File::create(&format!("out/cls0_{}.stl", i.1)).unwrap();
+		let v=i.0.triangulation(tol).to_polygon();
+		stl::write(&v, &mut obj, stl::StlType::Ascii).unwrap();
+	}
     unknown0.into_iter().try_for_each(|face| {
         let pt = face.boundaries()[0].vertex_iter().next().unwrap().point();
         let dir = hash::take_one_unit(pt);
@@ -113,8 +118,13 @@ fn process_one_pair_of_shells<C: ShapeOpsCurve<S>, S: ShapeOpsSurface>(
         }
         Some(())
     })?;
-	println!("未知の面の分類終了。次の殻を処理します...");
     let [mut and1, mut or1, unknown1] = cls1.and_or_unknown();
+	for i in [(&and1, "and"), (&or1, "or"), (&unknown1, "unknown")] {
+		std::fs::create_dir_all("out").unwrap();
+		let mut obj = std::fs::File::create(&format!("out/cls1_{}.stl", i.1)).unwrap();
+		let v=i.0.triangulation(tol).to_polygon();
+		stl::write(&v, &mut obj, stl::StlType::Ascii).unwrap();
+	}
     unknown1.into_iter().try_for_each(|face| {
         let pt = face.boundaries()[0].vertex_iter().next().unwrap().point();
         let dir = hash::take_one_unit(pt);
