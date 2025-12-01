@@ -1,6 +1,6 @@
 //! Implementation of Newton method
 
-use std::ops::{Mul, Sub};
+use std::ops::{Mul, Sub, Add};
 
 use crate::{cgmath64::*, tolerance::*};
 
@@ -14,9 +14,13 @@ pub struct CalcOutput<V, M> {
 }
 
 /// jacobian of function
-pub trait Jacobian<V>: Mul<V, Output = V> + Sized {
+pub trait Jacobian<V>: Mul<V, Output = V> + Mul<Self, Output = Self> + Add<Self, Output = Self> + Sized {
     #[doc(hidden)]
     fn invert(self) -> Option<Self>;
+    #[doc(hidden)]
+    fn transpose(&self) -> Self;
+    #[doc(hidden)]
+    fn identity(scalar: f64) -> Self;
 }
 
 impl Jacobian<f64> for f64 {
@@ -27,6 +31,14 @@ impl Jacobian<f64> for f64 {
             false => Some(1.0 / self),
         }
     }
+    #[inline(always)]
+    fn transpose(&self) -> Self {
+		*self
+    }
+    #[inline(always)]
+    fn identity(scalar: f64) -> Self {
+		scalar	
+	}
 }
 
 macro_rules! impl_jacobian {
@@ -34,6 +46,8 @@ macro_rules! impl_jacobian {
         impl Jacobian<$vector> for $matrix {
             #[inline(always)]
             fn invert(self) -> Option<Self> { SquareMatrix::invert(&self) }
+			fn transpose(&self) -> Self { Matrix::transpose(self) }
+			fn identity(scalar: f64) -> Self { SquareMatrix::from_value(scalar) }
         }
     };
 }
@@ -76,6 +90,44 @@ where
             return Ok(hint);
         }
         hint = next;
+    }
+    Err(log)
+}
+
+
+pub fn gauss_newton<V, M>(
+    function: impl Fn(V) -> CalcOutput<V, M>,
+    mut hint: V,
+    trials: usize,
+	mut lambda: f64,
+) -> Result<V, NewtonLog<V>>
+where
+    V: Sub<Output = V> + Copy + Tolerance + Norm,
+    M: Jacobian<V>,
+{
+	const COEFF_LAMBDA:f64=10.;
+	let mut output_last:Option<CalcOutput<V, M>>=None;
+    let mut log = NewtonLog::new(cfg!(debug_assertions), trials);
+    for _ in 0..=trials {
+        log.push(hint);
+		let output = output_last.take().unwrap_or_else(|| function(hint));
+		let rhs=output.derivation.transpose() * output.value;
+        let Some(inv) = (output.derivation.transpose() * output.derivation + M::identity(lambda)).invert() else {
+            log.set_degenerate(true);
+            return Err(log);
+        };
+        let candidate = hint - inv * rhs;
+		// 終了判定
+        if candidate.near2(&hint) {
+            return Ok(hint);
+        }
+		// Levenberg–Marquardt 法の λ 調整
+		let output_candidate=function(candidate);
+		(output_last, hint, lambda)=if output_candidate.value.norm_l2() < output.value.norm_l2(){
+			(Some(output_candidate), candidate, lambda/COEFF_LAMBDA)//解を更新して λ を減らす
+		}else{
+			(None, hint, lambda*COEFF_LAMBDA)//解を更新しないで λ を増やす
+		};
     }
     Err(log)
 }
@@ -137,3 +189,40 @@ mod newtonlog {
     }
 }
 pub use newtonlog::NewtonLog;
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	#[test]
+	fn test_newton() {
+		let function = |x: f64| CalcOutput {
+			value: x * x - 2.0,
+			derivation: 2.0 * x,
+		};
+		let sqrt2 = solve(function, 1.0, 5).unwrap();
+		assert!((sqrt2 - f64::sqrt(2.0)).abs() < 1e-10);
+	}
+	#[test]
+	fn test_gauss_newton() {
+		let function = |x: f64| CalcOutput {
+			value: x * x - 2.0,// (x * x - 2.0).powi(2),
+			derivation: 2.0 * x,//2.*(x*x-2.)*(2.*x),
+		};
+		let sqrt2 = gauss_newton(function, 1.0, 5, 0.0).unwrap();
+		assert!((sqrt2 - f64::sqrt(2.0)).abs() < 1e-10);
+	}
+	#[test]
+	fn test_gauss_newton_with_delta() {
+		// この関数は解が勾配が0に近づくため、ニュートン法やガウス・ニュートン法では収束しない
+		// 球を立方体から切り抜けない問題の根源である
+		// このテストケースが通れば、上記の問題を解決できる可能性がある
+		let function = |x: f64| CalcOutput {
+			value: 2.-(x-0.2).cos(),// (x * x - 2.0).powi(2),
+			derivation: (x-0.2).sin(),//2.*(x*x-2.)*(2.*x),
+		};
+		let solved = gauss_newton(function, 0.1, 100, 0.1).expect("gauss newton failed");
+		assert_eq!(((solved - 0.2).abs() - TOLERANCE).max(0.), 0.); //収束しない
+		//let solved = gauss_newton(function, 0.1, 5, 1.).expect("gauss newton failed");
+		//assert_eq!(((solved - 0.2).abs() - 1e-10).max(0.), 0.); // 収束する
+	}
+}

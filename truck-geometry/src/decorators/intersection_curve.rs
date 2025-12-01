@@ -1,3 +1,5 @@
+use std::hint;
+
 use super::*;
 use truck_base::newton::{self, CalcOutput};
 
@@ -29,9 +31,18 @@ where
             ),
         }
     };
+	println!("plane_point={plane_point:?}, plane_normal={plane_normal:?}");
     let (x, y) = hint0.or_else(|| surface0.search_nearest_parameter(plane_point, hint0, trials))?;
     let (z, w) = hint1.or_else(|| surface1.search_nearest_parameter(plane_point, hint1, trials))?;
-    let Vector4 { x, y, z, w } = newton::solve(function, Vector4 { x, y, z, w }, trials).ok()?;
+	let hint = Vector4 { x, y, z, w };
+	println!("hint={hint:?} 次が収束しないことが問題");
+    let Vector4 { x, y, z, w } = match newton::gauss_newton(function, hint, trials, 0.1) {
+		Ok(v) => v,
+		Err(e) => {
+			println!("ニュートン法の軌跡: {}", e);
+			return None
+		}	
+	};
     let point = surface0.subs(x, y).midpoint(surface1.subs(z, w));
     Some((point, Point2::new(x, y), Point2::new(z, w)))
 }

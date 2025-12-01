@@ -77,23 +77,28 @@ fn process_one_pair_of_shells<C: ShapeOpsCurve<S>, S: ShapeOpsSurface>(
     shell1: &Shell<Point3, C, S>,
     tol: f64,
 ) -> Option<[Shell<Point3, C, S>; 2]> {
+	// 正負を確認しているだけ
     nonpositive_tolerance!(tol);
     let poly_shell0 = shell0.triangulation(tol);
     let poly_shell1 = shell1.triangulation(tol);
+	println!("Triangulations completed.");
     let altshell0: AltCurveShell<C, S> =
         shell0.mapped(|x| *x, |c| Alternative::FirstType(c.clone()), Clone::clone);
     let altshell1: AltCurveShell<C, S> =
         shell1.mapped(|x| *x, |c| Alternative::FirstType(c.clone()), Clone::clone);
+	println!("AND/OR 計算の途中では「元の曲線」と「交差曲線」の両方を扱う必要があるので、FirstType:CとSecondType:IntersectionCurveの和型を使います。");
     let loops_store::LoopsStoreQuadruple {
         geom_loops_store0: loops_store0,
         geom_loops_store1: loops_store1,
         ..
     } = loops_store::create_loops_stores(&altshell0, &poly_shell0, &altshell1, &poly_shell1)?;
+	println!("交差ループ(輪郭)の抽出");
     let mut cls0 = divide_face::divide_faces(&altshell0, &loops_store0, tol)?;
     cls0.integrate_by_component();
     let mut cls1 = divide_face::divide_faces(&altshell1, &loops_store1, tol)?;
     cls1.integrate_by_component();
     let [mut and0, mut or0, unknown0] = cls0.and_or_unknown();
+	println!("未知の面を分類しています...");
     unknown0.into_iter().try_for_each(|face| {
         let pt = face.boundaries()[0].vertex_iter().next().unwrap().point();
         let dir = hash::take_one_unit(pt);
@@ -108,6 +113,7 @@ fn process_one_pair_of_shells<C: ShapeOpsCurve<S>, S: ShapeOpsSurface>(
         }
         Some(())
     })?;
+	println!("未知の面の分類終了。次の殻を処理します...");
     let [mut and1, mut or1, unknown1] = cls1.and_or_unknown();
     unknown1.into_iter().try_for_each(|face| {
         let pt = face.boundaries()[0].vertex_iter().next().unwrap().point();
@@ -137,11 +143,14 @@ pub fn and<C: ShapeOpsCurve<S>, S: ShapeOpsSurface>(
     solid1: &Solid<Point3, C, S>,
     tol: f64,
 ) -> Option<Solid<Point3, C, S>> {
+	println!("AND operation started.");
     let mut iter0 = solid0.boundaries().iter();
     let mut iter1 = solid1.boundaries().iter();
     let shell0 = iter0.next().unwrap();
     let shell1 = iter1.next().unwrap();
+	println!("Processing first pair of shells.");
     let [mut and_shell, _] = process_one_pair_of_shells(shell0, shell1, tol)?;
+	println!("First pair of shells processed.");
     for shell in iter0 {
         let [res, _] = process_one_pair_of_shells(&and_shell, shell, tol)?;
         and_shell = res;
@@ -150,7 +159,9 @@ pub fn and<C: ShapeOpsCurve<S>, S: ShapeOpsSurface>(
         let [res, _] = process_one_pair_of_shells(&and_shell, shell, tol)?;
         and_shell = res;
     }
+	println!("Second solid's shells processed.");
     let boundaries = and_shell.connected_components();
+	println!("AND operation completed.");
     Some(Solid::new(boundaries))
 }
 
